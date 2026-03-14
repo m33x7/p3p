@@ -8,15 +8,20 @@ pub struct Framing {
 }
 
 pub struct Message {
-    msg: String
+    pub msg: String
 }
 
 impl Framing {
     pub fn new(stream: TcpStream) -> Framing {
+        let r = stream.set_nonblocking(false);
+        match r {
+            Ok(_) => { }
+            Err(e) => eprintln!("Error setting framing to blocking : {e}")
+        };
         Framing {stream}
     }
 
-    pub fn write_msg(&mut self, msg: String) -> io::Result<()> {
+    pub fn write_msg(&mut self, msg: &str) -> io::Result<()> {
         let bytes = msg.as_bytes();
 
         if bytes.len() > u8::MAX as usize {
