@@ -3,7 +3,7 @@ use std::io::Read;
 use std::io::Write;
 use std::net::{TcpStream};
 
-pub struct Framing {
+pub struct LengthPrefixFraming {
     stream: TcpStream
 }
 
@@ -11,56 +11,59 @@ pub struct Message {
     pub msg: String
 }
 
-impl Framing {
-    pub fn new(stream: TcpStream) -> Framing {
-        let r = stream.set_nonblocking(false);
-        match r {
-            Ok(_) => { }
-            Err(e) => eprintln!("Error setting framing to blocking : {e}")
-        };
-        Framing {stream}
-    }
+pub trait Framing {
+    fn write_msg(&mut self, msg: &str) -> io::Result<()>;
 
-    pub fn write_msg(&mut self, msg: &str) -> io::Result<()> {
+    fn read_msg(&mut self) -> io::Result<Option<Message>>;
+}
+
+impl Framing for LengthPrefixFraming {
+    fn write_msg(&mut self, msg: &str) -> io::Result<()> {
         let bytes = msg.as_bytes();
 
         if bytes.len() > u8::MAX as usize {
             return Err(io::Error::new(io::ErrorKind::InvalidInput, "message too long"));
         }
 
+        // TODO - maybe writing in one go is faster.
         self.stream.write_all(&[bytes.len() as u8])?;
         self.stream.write_all(&bytes)?;
         Ok(())
     }
-}
 
-impl Iterator for Framing {
-    // TODO - change item to be io::Result<Message>.
-    type Item = Message;
-
-    fn next(&mut self) -> Option<Self::Item> {
+    fn read_msg(&mut self) -> io::Result<Option<Message>> {
         // Reading the length of message.
         let mut length_buffer = [0; 1];
 
-        if self.stream.read_exact(&mut length_buffer).is_err() {
-            return None;
-        }
+        match self.stream.read_exact(&mut length_buffer) {
+            Ok(_) => (),
+            Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => return Ok(None),
+            Err(e) => return Err(e),
+        };
 
         let message_length = length_buffer[0] as usize;
 
         // Reading the message itself.
-        let mut msg_buffer = vec![0u8; message_length];
+        let mut msg_buffer = vec![0u8; message_length as usize];
 
-        if self.stream.read_exact(&mut msg_buffer).is_err() {
-            return None;
-        }
+        match self.stream.read_exact(&mut msg_buffer) {
+            Ok(_) => (),
+            Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => return Ok(None),
+            Err(e) => return Err(e),
+        };
 
         let s = match String::from_utf8(msg_buffer) {
             Ok(s) => s,
-            Err(_) => return None
+            Err(_) => return Err(io::Error::new(io::ErrorKind::InvalidData, "Could not decode UTF-8 string."))
         };
 
-        Some(Message { msg: s })
+        Ok(Some(Message { msg: s }))
     }
 }
 
+impl LengthPrefixFraming {
+    pub fn new(stream: TcpStream) -> io::Result<LengthPrefixFraming> {
+        stream.set_nonblocking(true)?;
+        Ok(LengthPrefixFraming { stream })
+    }
+}
