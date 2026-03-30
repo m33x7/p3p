@@ -1,21 +1,22 @@
+use std::net::SocketAddr;
+use std::sync::mpsc::Receiver;
+use std::sync::mpsc::Sender;
+use std::sync::mpsc::TryRecvError;
 use std::thread;
 use std::io;
 use std::time::Duration;
 
 mod discovery;
-mod framing;
+mod transport;
 
-use crate::framing::{Framing};
+use crate::transport::{Transport, TransportMessage};
 
 fn main() -> std::io::Result<()> {
-    let write_stream = discovery::establish_connection()?;
-    let read_stream = write_stream.try_clone()?;
-
-    let write_framing = framing::LengthPrefixFraming::new(write_stream)?;
-    let read_framing = framing::LengthPrefixFraming::new(read_stream)?;
+    let mut transport = Transport::new();
+    let (tx, rx) = transport.spawn()?;
     
-    let read_thread = thread::spawn(move || output_message(read_framing));
-    let write_thread = thread::spawn(move || write_message(write_framing));
+    let read_thread = thread::spawn(move || output_message(rx));
+    let write_thread = thread::spawn(move || write_message(tx));
 
     read_thread.join().expect("reader thread panicked")?;
     write_thread.join().expect("writer thread panicked")?;
@@ -23,31 +24,34 @@ fn main() -> std::io::Result<()> {
     Ok(())
 }
 
-fn write_message(mut f: framing::LengthPrefixFraming) -> io::Result<()>{
-    let stdin = io::stdin();
+fn write_message(tx: Sender<TransportMessage>) -> io::Result<()>{
+    loop {
+        let stdin = io::stdin();
+        for line in stdin.lines() {
+            let line = line.unwrap();
+            if let Some((addr_str, msg)) = line.split_once(' ') {
+                if let Ok(addr) = addr_str.parse::<SocketAddr>() {
+                    tx.send(TransportMessage { msg: msg.to_string(), addr }); // TODO - handle error
+                } else {
+                    eprintln!("invalid address format: {}", addr_str);
+                }
+            } else {
+                eprintln!("invalid format, use '127.0.0.1:8080'");
+            }
+        }
 
-    for line in stdin.lines() {
-        let line = line?;
-        f.write_msg(line.trim())?;
+        thread::sleep(Duration::from_millis(300));
     }
-
-    Ok(())
 }
 
-fn output_message(mut f: framing::LengthPrefixFraming) -> io::Result<()>{
+fn output_message(rx: Receiver<TransportMessage>) -> io::Result<()>{
     loop {
-        match f.read_msg() {
-            Ok(Some(msg)) => println!(">>> {}", msg.msg),
-            Ok(None) => {}
-            Err(ref e) if e.kind() == io::ErrorKind::UnexpectedEof => {
-                println!("Connection closed by peer");
-                break;
-            }
-            Err(e) => return Err(e),
+        match rx.try_recv() {
+            Ok(msg) => println!(">>> {} {}", msg.addr, msg.msg),
+            Err(TryRecvError::Empty) => {}
+            Err(TryRecvError::Disconnected) => {}
         }
         
         thread::sleep(Duration::from_millis(250));
     }
-
-    Ok(())
 }

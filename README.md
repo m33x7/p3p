@@ -5,6 +5,15 @@ Trying out P2P + Crypto + Math
 
 - [X] Two peers chat
 - [ ] Discovery protocol - some toy one first
-- [ ] Multiple incoming connections
+- [X] Multiple incoming connections
+- [ ] Fix issue when listening/sending ports are different
+- [ ] Connection pool and/or dispatcher
 - [ ] Basic message encryption
 - [ ] Peer ID
+- [ ] Kademlia
+- [ ] QUIC
+- [ ] Multiplexing instead of messages with prefixes
+- [ ] Tokio
+- [ ] Connection TTL
+- [ ] Inbound/outbound connection distinction
+- [ ] NAT handling throw handshakes

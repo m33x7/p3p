@@ -7,14 +7,10 @@ pub struct LengthPrefixFraming {
     stream: TcpStream
 }
 
-pub struct Message {
-    pub msg: String
-}
-
 pub trait Framing {
     fn write_msg(&mut self, msg: &str) -> io::Result<()>;
 
-    fn read_msg(&mut self) -> io::Result<Option<Message>>;
+    fn read_msg(&mut self) -> io::Result<Option<String>>;
 }
 
 impl Framing for LengthPrefixFraming {
@@ -31,12 +27,13 @@ impl Framing for LengthPrefixFraming {
         Ok(())
     }
 
-    fn read_msg(&mut self) -> io::Result<Option<Message>> {
+    fn read_msg(&mut self) -> io::Result<Option<String>> {
         // Reading the length of message.
         let mut length_buffer = [0; 1];
 
         match self.stream.read_exact(&mut length_buffer) {
             Ok(_) => (),
+            Err(ref e) if e.kind() == io::ErrorKind::UnexpectedEof => return Ok(None),
             Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => return Ok(None),
             Err(e) => return Err(e),
         };
@@ -57,7 +54,7 @@ impl Framing for LengthPrefixFraming {
             Err(_) => return Err(io::Error::new(io::ErrorKind::InvalidData, "Could not decode UTF-8 string."))
         };
 
-        Ok(Some(Message { msg: s }))
+        Ok(Some(s))
     }
 }
 
