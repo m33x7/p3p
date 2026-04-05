@@ -1,6 +1,5 @@
 use std::net::SocketAddr;
 use std::sync::mpsc::Receiver;
-use std::sync::mpsc::Sender;
 use std::sync::mpsc::TryRecvError;
 use std::thread;
 use std::io;
@@ -12,11 +11,10 @@ mod transport;
 use crate::transport::{Transport, TransportMessage};
 
 fn main() -> std::io::Result<()> {
-    let mut transport = Transport::new();
-    let (tx, rx) = transport.spawn()?;
+    let (transport, incoming_messages) = Transport::spawn()?;
     
-    let read_thread = thread::spawn(move || output_message(rx));
-    let write_thread = thread::spawn(move || write_message(tx));
+    let read_thread = thread::spawn(move || output_message(incoming_messages));
+    let write_thread = thread::spawn(move || write_message(transport));
 
     read_thread.join().expect("reader thread panicked")?;
     write_thread.join().expect("writer thread panicked")?;
@@ -24,14 +22,14 @@ fn main() -> std::io::Result<()> {
     Ok(())
 }
 
-fn write_message(tx: Sender<TransportMessage>) -> io::Result<()>{
+fn write_message(transport: Transport) -> io::Result<()>{
     loop {
         let stdin = io::stdin();
         for line in stdin.lines() {
             let line = line.unwrap();
             if let Some((addr_str, msg)) = line.split_once(' ') {
                 if let Ok(addr) = addr_str.parse::<SocketAddr>() {
-                    tx.send(TransportMessage { msg: msg.to_string(), addr }); // TODO - handle error
+                    transport.send(TransportMessage { msg: msg.to_string(), addr }); // TODO - handle error
                 } else {
                     eprintln!("invalid address format: {}", addr_str);
                 }

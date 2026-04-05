@@ -7,7 +7,8 @@ Trying out P2P + Crypto + Math
 - [ ] Discovery protocol - some toy one first
 - [X] Multiple incoming connections
 - [ ] Fix issue when listening/sending ports are different
-- [ ] Connection pool and/or dispatcher
+- [ ] Transport layer - connection pool with interior mutability
+- [ ] Transport layer - dispatcher
 - [ ] Basic message encryption
 - [ ] Peer ID
 - [ ] Kademlia

@@ -1,5 +1,9 @@
-use std::io;
-use std::net::{SocketAddr, TcpListener, TcpStream};
+use std::sync::Arc;
+use std::thread::JoinHandle;
+use std::{io, thread};
+use std::net::{SocketAddr, TcpListener};
+
+use crate::transport::connectionpool::ConnectionPool;
 
 pub struct PortRange { 
     pub start: u16,
@@ -7,46 +11,38 @@ pub struct PortRange {
 }
 
 pub struct Listener {
-    tcp_listener: TcpListener,
+    pub bind_addr: SocketAddr,
+    pub listener_thread: JoinHandle<()>
 }
 
 impl Listener {
     // Binds to a port.
-    pub fn bind(port_range: PortRange) -> io::Result<(Self, SocketAddr)> {
+    pub fn listen(port_range: PortRange, pool: Arc<ConnectionPool>) -> io::Result<Self> {
         for port in port_range.start..=port_range.end {
-            let addr = SocketAddr::from(([127, 0, 0, 1], port));
-            match TcpListener::bind(addr) {
+            let bind_addr = SocketAddr::from(([127, 0, 0, 1], port));
+            match TcpListener::bind(bind_addr) {
                 Ok(tcp_listener) => {
-                    println!("Listener: binded to {addr}");
-                    return Ok((Listener {tcp_listener}, addr ))
+                    println!("[Listener] Binded to {bind_addr}");
+
+                    let listener_thread = thread::spawn(move || 
+                        match tcp_listener.accept() {
+                            Ok((stream, addr)) => {
+                                pool.replace(addr, stream);
+                                println!("[Listener] Incoming connection succeeded: {:?}", addr);
+                            }
+                            Err(e) => {
+                                eprintln!("[Listener] Incoming connection failed: {:?}", e);
+                            }
+                        }
+                    );
+
+                    return Ok(Listener { bind_addr, listener_thread });
                 },
                 Err(e) if e.kind() == std::io::ErrorKind::AddrInUse => continue,
                 Err(e) => return Err(e),
             }
         }
 
-        Err(io::Error::new(io::ErrorKind::AddrNotAvailable, "No available address"))
-    }
-
-    pub fn incoming(&self) -> Incoming {
-        Incoming { listener: self }
-    }
-}
-
-pub struct Incoming<'a> {
-    listener: &'a Listener
-}
-
-impl Iterator for Incoming<'_> {
-    type Item = io::Result<(TcpStream, SocketAddr)>;
-
-    fn next(&mut self) -> Option<Self::Item>{
-        match self.listener.tcp_listener.accept() {
-            Ok(v) => return Some(Ok(v)),
-            Err(e) => {
-                eprintln!("incoming connection failed: {:?}", e);
-                return Some(Err(e));
-            }
-        };
+        Err(io::Error::new(io::ErrorKind::AddrNotAvailable, "[Listener] No available address"))
     }
 }

@@ -4,7 +4,7 @@ use std::io::Write;
 use std::net::{TcpStream};
 
 pub struct LengthPrefixFraming {
-    stream: TcpStream
+    pub stream: TcpStream
 }
 
 pub trait Framing {
@@ -59,8 +59,8 @@ impl Framing for LengthPrefixFraming {
 }
 
 impl LengthPrefixFraming {
-    pub fn new(stream: TcpStream) -> io::Result<LengthPrefixFraming> {
-        stream.set_nonblocking(true)?;
-        Ok(LengthPrefixFraming { stream })
+    pub fn into_read_write(self) -> io::Result<(LengthPrefixFraming, LengthPrefixFraming)> {
+        let stream = self.stream.try_clone()?;
+        Ok((self, LengthPrefixFraming { stream }))
     }
 }

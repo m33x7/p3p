@@ -1,60 +1,87 @@
-use std::collections::{HashMap};
-use std::f32::consts::E;
-use std::sync::{Arc, Mutex};
-use std::sync::mpsc::{self, TryRecvError};
-use std::sync::mpsc::{Sender, Receiver};
+use std::sync::{Arc};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{Sender};
 use std::thread::{self, JoinHandle};
 use std::io;
 use std::net::{SocketAddr, TcpStream};
 use std::time::Duration;
 
+use crate::transport::{TransportMessage};
+use crate::transport::connectionpool::ConnectionPool;
 use crate::transport::framing::{Framing, LengthPrefixFraming};
 
 pub struct TcpConnection {
-    framing: LengthPrefixFraming
+    pub addr: SocketAddr,
+    working_thread: JoinHandle<()>,
+    cancelled: Arc<AtomicBool>,
+    send_framing: LengthPrefixFraming
 }
 
-// TODO - add ability for the connection to signal that it needs to be removed from the connection pool.
-// TODO - add ability to close the connection - via "Drop" trait.
-// TODO - handle panic inside a thread.
 impl TcpConnection {
-    pub fn new(stream: TcpStream) -> io::Result<TcpConnection> {
-        let framing = LengthPrefixFraming::new(stream)?;
-        Ok(TcpConnection { framing })
-    }
+    fn spawn(framing: LengthPrefixFraming, incoming_messages: Sender<TransportMessage>, addr: SocketAddr, pool: Arc<ConnectionPool>) -> io::Result<TcpConnection> {
+        // Used to cancel the connection
+        let cancelled = Arc::new(AtomicBool::new(false));
 
-    pub fn spawn(mut self) -> (Sender<String>, Receiver<String>) {
-        let (incoming_tx, incoming_rx): (Sender<String>, Receiver<String>) = mpsc::channel();
-        let (outgoing_tx, outgoing_rx): (Sender<String>, Receiver<String>) = mpsc::channel();
+        // We separate read and write operations over the same TcpStream
+        let (listen_framing, send_framing) = framing.into_read_write()?;
 
-        // Start listening to incoming messages.
-        thread::spawn(move || {
-            loop {
-                match self.framing.read_msg() {
-                    Ok(Some(msg)) => incoming_tx.send(msg).unwrap(),
-                    Ok(None) => {},
-                    Err(e) => self.handle_error(e),
-                };
-
-                match outgoing_rx.try_recv() {
-                    Ok(msg) => {
-                        match self.framing.write_msg(&msg) {
-                            Ok(()) => {},
-                            Err(e) => self.handle_error(e),
-                        }
-                    },
-                    Err(TryRecvError::Empty) => {}
-                    Err(TryRecvError::Disconnected) => {}
-                };
-
-                thread::sleep(Duration::from_millis(250));
+        // Start working thread
+        let working_thread = thread::spawn({
+            let cancelled = cancelled.clone();
+            move || {
+                let e = Self::listen_loop(addr, incoming_messages, listen_framing, cancelled);
+                eprintln!("{:?}", e);
+                pool.remove(&addr);
             }
         });
 
-        (outgoing_tx, incoming_rx)
+        Ok(TcpConnection { addr, working_thread, cancelled, send_framing })
     }
 
-    fn handle_error(&self, e: io::Error) -> (){
-        eprintln!("{:?}", e);
+    pub fn cancel(self) {
+        // TODO - add TcpStream shutdown.
+        println!("Connection cancellation requested.");
+        self.cancelled.store(true, Ordering::Relaxed);
+        self.working_thread.join(); // TODO - use the result.
+    }
+
+    pub fn send(&mut self, msg: &str) -> io::Result<()> {
+        // TODO - if message write failed - remove the connection from the Pool.
+        self.send_framing.write_msg(msg)
+    }
+
+    fn listen_loop(addr: SocketAddr, incoming_messages: Sender<TransportMessage>, mut incoming_framing: LengthPrefixFraming, cancelled: Arc<AtomicBool>) -> io::Result<()>{
+        while !cancelled.load(Ordering::Relaxed) {
+
+            // Listen to incoming messages
+            match incoming_framing.read_msg() {
+                Ok(Some(msg)) => incoming_messages.send(TransportMessage { msg, addr }).unwrap(),
+                Ok(None) => {},
+                Err(e) => return Err(e), // Error when reading message to TcpStream
+            };
+
+            thread::sleep(Duration::from_millis(250));
+        }
+
+        Ok(())
+    }
+}
+
+
+// TODO - connection settings can be stored here. For example, framing selection, connection timeout.
+pub struct ConnectionFactory {
+    pub dispatcher_tx: Sender<TransportMessage>
+}
+
+impl ConnectionFactory {
+    pub fn new_connection_with_stream(&self, stream: TcpStream, pool: Arc<ConnectionPool>, addr: SocketAddr) -> io::Result<TcpConnection>{
+        let framing = LengthPrefixFraming { stream };
+        TcpConnection::spawn(framing, self.dispatcher_tx.clone(), addr, pool)
+    }
+}
+
+impl Clone for ConnectionFactory {
+    fn clone(&self) -> Self {
+        Self { dispatcher_tx: self.dispatcher_tx.clone() }
     }
 }
