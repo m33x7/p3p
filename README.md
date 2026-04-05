@@ -7,11 +7,12 @@ Trying out P2P + Crypto + Math
 - [ ] Discovery protocol - some toy one first
 - [X] Multiple incoming connections
 - [ ] Fix issue when listening/sending ports are different
-- [ ] Transport layer - connection pool with interior mutability
-- [ ] Transport layer - dispatcher
+- [X] Transport layer - connection pool with interior mutability
+- [X] Transport layer - dispatcher
 - [ ] Basic message encryption
 - [ ] Peer ID
 - [ ] Kademlia
+- [ ] UDP
 - [ ] QUIC
 - [ ] Multiplexing instead of messages with prefixes
 - [ ] Tokio
