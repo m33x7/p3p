@@ -5,14 +5,14 @@ use std::thread;
 use std::io;
 use std::time::Duration;
 
-mod discovery;
 mod transport;
 
-use crate::transport::{Transport, TransportMessage};
+use crate::transport::{TransportMessage, Transport, TransportTrait};
 
 fn main() -> std::io::Result<()> {
-    let (transport, incoming_messages) = Transport::spawn()?;
-    
+
+    let (transport, incoming_messages) = Transport::spawn_udp()?;
+
     let read_thread = thread::spawn(move || output_message(incoming_messages));
     let write_thread = thread::spawn(move || write_message(transport));
 
@@ -29,7 +29,7 @@ fn write_message(transport: Transport) -> io::Result<()>{
             let line = line.unwrap();
             if let Some((addr_str, msg)) = line.split_once(' ') {
                 if let Ok(addr) = addr_str.parse::<SocketAddr>() {
-                    transport.send(TransportMessage { msg: msg.to_string(), addr }); // TODO - handle error
+                    transport.send(TransportMessage { msg: msg.to_string(), addr })?; // TODO - handle error
                 } else {
                     eprintln!("invalid address format: {}", addr_str);
                 }

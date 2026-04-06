@@ -19,3 +19,4 @@ Trying out P2P + Crypto + Math
 - [ ] Connection TTL
 - [ ] Inbound/outbound connection distinction
 - [ ] NAT handling throw handshakes
+- [ ] Another framing for TCP

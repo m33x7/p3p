@@ -6,9 +6,9 @@ use std::io;
 use std::net::{SocketAddr, TcpStream};
 use std::time::Duration;
 
-use crate::transport::{TransportMessage};
+use crate::transport::TransportMessage;
 use crate::transport::connectionpool::ConnectionPool;
-use crate::transport::framing::{Framing, LengthPrefixFraming};
+use crate::transport::framing::{LengthPrefixFraming, Framing};
 
 pub struct TcpConnection {
     pub addr: SocketAddr,

@@ -1,57 +1,81 @@
-
-use std::hash::Hash;
-use std::io;
-use std::net::{TcpListener, SocketAddr, TcpStream};
-use std::collections::{HashMap};
-use std::sync::{Arc, Mutex, MutexGuard};
-use std::sync::mpsc::{self, TryRecvError};
-use std::sync::mpsc::{Sender, Receiver};
-use std::thread::{self, JoinHandle};
+use std::{io, sync::Arc};
+use std::net::{SocketAddr, UdpSocket};
+use std::sync::mpsc::{self, Receiver};
+use enum_dispatch::enum_dispatch;
+use crate::transport::listener::BindingPortRange;
 
 mod listener;
-use listener::{Listener, PortRange};
-    
-mod connection;
-use connection::{TcpConnection};
-
-mod framing;
-use framing::{LengthPrefixFraming};
-
 mod connectionpool;
-use connectionpool::{ConnectionPool};
-
-use crate::transport::connection::ConnectionFactory;
-
-pub struct Transport {
-    pub connection_pool: Arc<ConnectionPool>,
-    pub listener: Listener
-}
+mod connection;
+mod framing;
 
 pub struct TransportMessage {
     pub msg: String,
     pub addr: SocketAddr
 }
 
-impl Transport {
+#[enum_dispatch(TransportTrait)]
+pub enum Transport {
+    TcpTransport(TcpTransport),
+    UdpTransport(UdpTransport),
+}
 
-    // TODO - change it to receive trait Framing instead of stream.
-    pub fn spawn() -> io::Result<(Self, Receiver<TransportMessage>)> {
+#[enum_dispatch]
+pub trait TransportTrait {
+    fn send(&self, msg: TransportMessage) -> io::Result<()>;
+    fn get_binding_addr(&self) -> SocketAddr;
+}
+
+impl Transport {
+    pub fn spawn_tcp() -> io::Result<(Transport, Receiver<TransportMessage>)> {
         let (incoming_tx, incoming_rx) = mpsc::channel();
         
-        let connection_factory = ConnectionFactory { dispatcher_tx: incoming_tx };
-        let connection_pool = ConnectionPool::new(connection_factory);
+        let connection_factory = connection::ConnectionFactory { dispatcher_tx: incoming_tx };
+        let connection_pool = connectionpool::ConnectionPool::new(connection_factory);
 
-        let listener = Listener::listen(PortRange { start: 8080, end: 8090 }, connection_pool.clone())?;
+        let listener = listener::Listener::tcp_listen(BindingPortRange { start: 8080, end: 8090 }, connection_pool.clone())?;
 
-        Ok((Transport { listener, connection_pool }, incoming_rx))
+        Ok((Transport::TcpTransport(TcpTransport { listener, connection_pool }), incoming_rx))
     }
 
-    pub fn send(&self, msg: TransportMessage) -> io::Result<()> {
+    pub fn spawn_udp() -> io::Result<(Transport, Receiver<TransportMessage>)> {
+        let (incoming_tx, incoming_rx) = mpsc::channel();
 
-        println!("[Transport] Sending message {:?}", msg.addr);
-        let mut pooled_connection = self.connection_pool.get(msg.addr)?;
-        pooled_connection.send(&msg.msg);
+        let (listener, socket) = listener::Listener::udp_listen(BindingPortRange { start: 4000, end: 4080 }, incoming_tx)?;
 
+        Ok((Transport::UdpTransport(UdpTransport { listener, socket }), incoming_rx))
+    }
+}
+
+pub struct UdpTransport {
+    listener: listener::Listener,
+    socket: UdpSocket
+}
+
+impl TransportTrait for UdpTransport {
+    fn send(&self, msg: TransportMessage) -> io::Result<()> {
+        self.socket.send_to(msg.msg.as_bytes(), msg.addr)?;
         Ok(())
+    }
+
+    fn get_binding_addr(&self) -> SocketAddr {
+        self.listener.bind_addr
+    }
+}
+
+pub struct TcpTransport {
+    connection_pool: Arc<connectionpool::ConnectionPool>,
+    listener: listener::Listener
+}
+
+impl TransportTrait for TcpTransport {
+    fn send(&self, msg: TransportMessage) -> io::Result<()> {
+        println!("[TcpTransport] Sending message {:?}", msg.addr);
+        let mut pooled_connection = self.connection_pool.get(msg.addr)?;
+        pooled_connection.send(&msg.msg)
+    }
+    
+    fn get_binding_addr(&self) -> SocketAddr {
+        self.listener.bind_addr
     }
 }
