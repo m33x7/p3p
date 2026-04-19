@@ -12,7 +12,7 @@ Trying out P2P + Crypto + Math
 - [ ] Basic message encryption
 - [ ] Peer ID
 - [ ] Kademlia
-- [ ] UDP
+- [X] UDP
 - [ ] QUIC
 - [ ] Multiplexing instead of messages with prefixes
 - [ ] Tokio
