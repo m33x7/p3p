@@ -26,7 +26,7 @@ crate p3p:
 - [ ] Noise encryption
 - [ ] Add versioning to discoverability and lower levels
 
-crate async_runtime:
+crate runtime:
 - [ ] Implement async runtime (should be easy !!!)
 
 overall project:

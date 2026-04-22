@@ -26,14 +26,6 @@ impl Peer {
         }
     }
 
-    fn update_from_message(&mut self, message: IncomingDiscoveryMessage){ // We heard from peer directly, we can update it's addr
-        let addr = message.from_peer_addr;
-        let now = Some(SystemTime::now());
-        self.addr_to_last_ping
-            .entry(addr)
-            .insert_entry(now);
-    }
-
     fn update_from_gossip(&mut self, gossip: &PeerGossip){
         let PeerGossip { peer_id: _, addr } = gossip;
         for addr in addr.into_iter() {
@@ -49,17 +41,6 @@ impl Peer {
 
     fn is_trusty(&self) -> bool { // If we can share this peer with others
         self.addr_to_last_ping.values().any(|v| v.is_some())
-    }
-
-    fn get_addresses_to_ping(&self, older_than: SystemTime) -> HashSet<SocketAddr> {
-        self.addr_to_last_ping
-            .iter()
-            .filter_map(|(&addr, last_ping)|
-                last_ping
-                    .is_none_or(|t| t < older_than)
-                    .then_some(addr)
-            )
-            .collect()
     }
 
     fn get_address(&self) -> Option<SocketAddr> { // Returns the last seen address that can be used for gossiping
@@ -227,10 +208,6 @@ impl fmt::Display for DiscoveryMessage {
 enum DiscoveryError {
     #[error("Invalid discovery message.")]
     InvalidDiscoveryMessage,
-    #[error("Invalid HELLO message")]
-    InvalidHelloMessage,
-    #[error("Invalid PEERLIST message")]
-    InvalidPeerListMessage,
     #[error("Invalid int number")]
     InvalidIntNumber(#[from] std::num::ParseIntError),
     #[error("Invalid addr")]
@@ -395,7 +372,7 @@ impl BootstrapDiscoveryV1 {
         // We can't add them right to the list of peers because we don't know their peer_id.
         // If I'm bootstrap node - messages are filtered out in "handle_message".
         for addr in bootstrap_nodes.into_iter() {
-            bootstrap_discovery_v1.send(DiscoveryMessage::Ping, addr); // TODO - handle error.
+            let _ = bootstrap_discovery_v1.send(DiscoveryMessage::Ping, addr); // TODO - handle error.
         }
 
         let discoverer_thread = thread::spawn({
@@ -433,7 +410,7 @@ impl BootstrapDiscoveryV1 {
         // Send PING to all old addresses.
         let old_addresses = self.get_all_old_addresses(&pinged_peers_ids, older_than);
         for addr in old_addresses.into_iter() {
-            self.send(DiscoveryMessage::Ping, addr); // TODO - handle error and remove address
+            let _ = self.send(DiscoveryMessage::Ping, addr); // TODO - handle error and remove address
         }
 
         pinged_peers_ids
@@ -443,7 +420,7 @@ impl BootstrapDiscoveryV1 {
         // Send PeerList for gossiping.
         let trusty_peers = self.get_trusty_peers();
         for addr in self.get_peer_addresses(&peer_ids) {
-            self.send(DiscoveryMessage::PeerListGet { peers: trusty_peers.clone() }, addr);
+            let _ = self.send(DiscoveryMessage::PeerListGet { peers: trusty_peers.clone() }, addr); // Ignore the result for now.
         }
     }
 
@@ -467,11 +444,11 @@ impl BootstrapDiscoveryV1 {
             DiscoveryMessage::Ping => responses.push(DiscoveryMessage::Pong),
             DiscoveryMessage::Pong => {},
             DiscoveryMessage::PeerList { peers } => { // Add peers and request info for every new peer
-                self.add_peers(peers).into_iter().map(
+                self.add_peers(peers).into_iter().for_each(
                     |new_peer| responses.push(DiscoveryMessage::PeerGossipGet { gossip: PeerGossip::from_peer_id(new_peer) }));
             },
             DiscoveryMessage::PeerListGet { peers } => { // Add peers and request info for every new peer
-                self.add_peers(peers).into_iter().map(
+                self.add_peers(peers).into_iter().for_each(
                     |new_peer| responses.push(DiscoveryMessage::PeerGossipGet { gossip: PeerGossip::from_peer_id(new_peer) }));
 
                 // Also add response for the list of peers that we know.
