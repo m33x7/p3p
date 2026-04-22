@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::net::SocketAddr;
 use std::sync::mpsc::Receiver;
 use std::sync::mpsc::TryRecvError;
@@ -6,50 +7,24 @@ use std::io;
 use std::time::Duration;
 
 mod transport;
+mod bootstrap_discovery;
 
 use crate::transport::{TransportMessage, Transport, TransportTrait};
 
 fn main() -> std::io::Result<()> {
-
     let (transport, incoming_messages) = Transport::spawn_udp()?;
 
-    let read_thread = thread::spawn(move || output_message(incoming_messages));
-    let write_thread = thread::spawn(move || write_message(transport));
+    let bootstrap_node: SocketAddr = "0.0.0.0:4000".parse().unwrap();
 
-    read_thread.join().expect("reader thread panicked")?;
-    write_thread.join().expect("writer thread panicked")?;
+    let (listener_thread, discoverer_thread) = 
+        bootstrap_discovery::BootstrapDiscoveryV1::bootstrap_discovery_start(
+            transport,
+            incoming_messages,
+            HashSet::from([bootstrap_node])
+        );
+
+    listener_thread.join();
+    discoverer_thread.join();
     
     Ok(())
-}
-
-fn write_message(transport: Transport) -> io::Result<()>{
-    loop {
-        let stdin = io::stdin();
-        for line in stdin.lines() {
-            let line = line.unwrap();
-            if let Some((addr_str, msg)) = line.split_once(' ') {
-                if let Ok(addr) = addr_str.parse::<SocketAddr>() {
-                    transport.send(TransportMessage { msg: msg.to_string(), addr })?; // TODO - handle error
-                } else {
-                    eprintln!("invalid address format: {}", addr_str);
-                }
-            } else {
-                eprintln!("invalid format, use '127.0.0.1:8080'");
-            }
-        }
-
-        thread::sleep(Duration::from_millis(300));
-    }
-}
-
-fn output_message(rx: Receiver<TransportMessage>) -> io::Result<()>{
-    loop {
-        match rx.try_recv() {
-            Ok(msg) => println!(">>> {} {}", msg.addr, msg.msg),
-            Err(TryRecvError::Empty) => {}
-            Err(TryRecvError::Disconnected) => {}
-        }
-        
-        thread::sleep(Duration::from_millis(250));
-    }
 }

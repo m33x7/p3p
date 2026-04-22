@@ -5,3 +5,5 @@ edition = "2021"
 
 [dependencies]
 enum_dispatch = "0.3.13"
+thiserror = "*"
+rand = "*"

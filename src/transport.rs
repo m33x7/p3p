@@ -23,7 +23,7 @@ pub enum Transport {
 #[enum_dispatch]
 pub trait TransportTrait {
     fn send(&self, msg: TransportMessage) -> io::Result<()>;
-    fn get_binding_addr(&self) -> SocketAddr;
+    fn get_binding_port(&self) -> u16;
 }
 
 impl Transport {
@@ -58,11 +58,12 @@ impl TransportTrait for UdpTransport {
         Ok(())
     }
 
-    fn get_binding_addr(&self) -> SocketAddr {
-        self.listener.bind_addr
+    fn get_binding_port(&self) -> u16 {
+        self.listener.bind_addr.port()
     }
 }
 
+// Transport layer should be able to work with ports/addresses
 pub struct TcpTransport {
     connection_pool: Arc<connectionpool::ConnectionPool>,
     listener: listener::Listener
@@ -74,8 +75,8 @@ impl TransportTrait for TcpTransport {
         let mut pooled_connection = self.connection_pool.get(msg.addr)?;
         pooled_connection.send(&msg.msg)
     }
-    
-    fn get_binding_addr(&self) -> SocketAddr {
-        self.listener.bind_addr
+
+    fn get_binding_port(&self) -> u16 {
+        self.listener.bind_addr.port()
     }
 }
