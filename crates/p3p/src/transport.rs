@@ -1,82 +1,63 @@
-use std::{io, sync::Arc};
-use std::net::{SocketAddr, UdpSocket};
-use std::sync::mpsc::{self, Receiver};
-use enum_dispatch::enum_dispatch;
-use crate::transport::listener::BindingPortRange;
+use tokio::net::UdpSocket;
+use tokio::sync::mpsc;
+use tokio::task::JoinHandle;
+use std::{io, net::SocketAddr, sync::Arc};
+use std::io::Result;
 
-mod listener;
-mod connectionpool;
-mod connection;
-mod framing;
-
-pub struct TransportMessage {
-    pub msg: String,
-    pub addr: SocketAddr
+struct BindingPortRange {
+    start: u16,
+    end: u16
 }
 
-#[enum_dispatch(TransportTrait)]
-pub enum Transport {
-    TcpTransport(TcpTransport),
-    UdpTransport(UdpTransport),
+struct UdpTransport {
+    socket: Arc<UdpSocket>,
+    incoming_rx: mpsc::Receiver<TransportMessage>,
+    listening_task: JoinHandle<()> // No need to have Result here.
 }
 
-#[enum_dispatch]
-pub trait TransportTrait {
-    fn send(&self, msg: TransportMessage) -> io::Result<()>;
-    fn get_binding_port(&self) -> u16;
+struct TransportMessage { 
+    msg: String,
+    addr: SocketAddr, // it's from/to address in case we receive/send
 }
 
-impl Transport {
-    pub fn spawn_tcp() -> io::Result<(Transport, Receiver<TransportMessage>)> {
-        let (incoming_tx, incoming_rx) = mpsc::channel();
-        
-        let connection_factory = connection::ConnectionFactory { dispatcher_tx: incoming_tx };
-        let connection_pool = connectionpool::ConnectionPool::new(connection_factory);
+impl UdpTransport {
+    pub async fn spawn(port_range: BindingPortRange) -> Result<UdpTransport> {
+        for port in port_range.start..=port_range.end {
+            let (incoming_tx, incoming_rx) = mpsc::channel::<TransportMessage>(1_000);
+            
+            let bind_addr = SocketAddr::from(([0, 0, 0, 0], port));
+            let socket= UdpSocket::bind(bind_addr).await;
+            match socket {
+                Ok(socket) => {
+                    let socket = Arc::new(socket);
 
-        let listener = listener::Listener::tcp_listen(BindingPortRange { start: 8080, end: 8090 }, connection_pool.clone())?;
+                    // spawn listener task
+                    let listening_socket = socket.clone();
+                    let listening_task = tokio::spawn(async move {
+                        let mut buf = [0; 1024];
+                        loop {
+                            let incoming = listening_socket.recv_from(&mut buf).await;
+                            match incoming {
+                                Ok((len, addr)) => {
+                                    let msg = String::from_utf8_lossy(&buf[..len]);
+                                    incoming_tx.send(TransportMessage { msg: msg.to_string(), addr }).await.unwrap(); // panic if the channel is broken.
+                                }
+                                Err(e) => eprintln!("Error on incoming : {e}")
+                            }
+                        };
+                    });
 
-        Ok((Transport::TcpTransport(TcpTransport { listener, connection_pool }), incoming_rx))
+                    return Ok(UdpTransport { socket, incoming_rx, listening_task });
+                },
+                Err(e) if e.kind() == std::io::ErrorKind::AddrInUse => continue,
+                Err(e) => return Err(e),
+            }
+        }
+
+        Err(io::Error::new(io::ErrorKind::AddrNotAvailable, "[Listener] No available address"))
     }
 
-    pub fn spawn_udp() -> io::Result<(Transport, Receiver<TransportMessage>)> {
-        let (incoming_tx, incoming_rx) = mpsc::channel();
-
-        let (listener, socket) = listener::Listener::udp_listen(BindingPortRange { start: 4000, end: 4080 }, incoming_tx)?;
-
-        Ok((Transport::UdpTransport(UdpTransport { listener, socket }), incoming_rx))
-    }
-}
-
-pub struct UdpTransport {
-    listener: listener::Listener,
-    socket: UdpSocket
-}
-
-impl TransportTrait for UdpTransport {
-    fn send(&self, msg: TransportMessage) -> io::Result<()> {
-        self.socket.send_to(msg.msg.as_bytes(), msg.addr)?;
-        Ok(())
-    }
-
-    fn get_binding_port(&self) -> u16 {
-        self.listener.bind_addr.port()
-    }
-}
-
-// Transport layer should be able to work with ports/addresses
-pub struct TcpTransport {
-    connection_pool: Arc<connectionpool::ConnectionPool>,
-    listener: listener::Listener
-}
-
-impl TransportTrait for TcpTransport {
-    fn send(&self, msg: TransportMessage) -> io::Result<()> {
-        println!("[TcpTransport] Sending message {:?}", msg.addr);
-        let mut pooled_connection = self.connection_pool.get(msg.addr)?;
-        pooled_connection.send(&msg.msg)
-    }
-
-    fn get_binding_port(&self) -> u16 {
-        self.listener.bind_addr.port()
+    pub async fn send(&self, msg: TransportMessage) -> Result<usize> {
+        self.socket.send_to(msg.msg.as_bytes(), msg.addr).await
     }
 }
