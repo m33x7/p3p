@@ -1,7 +1,6 @@
 [workspace]
 members = [
     "crates/p3p",
-    "crates/runtime"
 ]
 
 resolver = "2"

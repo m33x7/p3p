@@ -16,7 +16,6 @@ crate p3p:
 - [X] UDP
 - [ ] QUIC
 - [ ] Multiplexing
-- [ ] Use self-written async runtime
 - [ ] Use Tokio
 - [ ] Connection TTL
 - [ ] Inbound/outbound connection distinction
@@ -25,10 +24,4 @@ crate p3p:
 - [ ] Add UT
 - [ ] Noise encryption
 - [ ] Add versioning to discoverability and lower levels
-
-crate runtime:
-- [ ] Implement async runtime (should be easy !!!)
-
-overall project:
-- [ ] Add some tests where necessary
 

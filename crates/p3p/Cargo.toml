@@ -4,7 +4,6 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-runtime = { path = "../runtime" }
 enum_dispatch = "0.3.13"
 thiserror = "*"
 rand = "*"
