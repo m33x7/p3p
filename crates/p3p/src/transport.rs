@@ -1,53 +1,35 @@
 use tokio::net::UdpSocket;
-use tokio::sync::mpsc;
-use tokio::task::JoinHandle;
 use std::{io, net::SocketAddr, sync::Arc};
 use std::io::Result;
+use async_trait::async_trait;
 
-struct BindingPortRange {
-    start: u16,
-    end: u16
+pub struct BindingPortRange {
+    pub start: u16,
+    pub end: u16
 }
 
-struct UdpTransport {
-    socket: Arc<UdpSocket>,
-    incoming_rx: mpsc::Receiver<TransportMessage>,
-    listening_task: JoinHandle<()> // No need to have Result here.
+#[async_trait]
+pub trait Transport {
+    async fn send(&self, msg: TransportMessage) -> Result<usize>;
+    async fn receive(&self, buf: &mut [u8; 1024]) -> Result<TransportMessage>;
 }
 
-struct TransportMessage { 
-    msg: String,
-    addr: SocketAddr, // it's from/to address in case we receive/send
+pub struct UdpTransport {
+    pub socket: Arc<UdpSocket>, // We listen and send from the same socket.
+}
+
+pub struct TransportMessage { 
+    pub msg: String,
+    pub addr: SocketAddr, // it's from/to address in case we receive/send
 }
 
 impl UdpTransport {
-    pub async fn spawn(port_range: BindingPortRange) -> Result<UdpTransport> {
+    pub async fn bind(port_range: BindingPortRange) -> Result<UdpTransport> {
         for port in port_range.start..=port_range.end {
-            let (incoming_tx, incoming_rx) = mpsc::channel::<TransportMessage>(1_000);
-            
             let bind_addr = SocketAddr::from(([0, 0, 0, 0], port));
-            let socket= UdpSocket::bind(bind_addr).await;
-            match socket {
+            match UdpSocket::bind(bind_addr).await {
                 Ok(socket) => {
-                    let socket = Arc::new(socket);
-
-                    // spawn listener task
-                    let listening_socket = socket.clone();
-                    let listening_task = tokio::spawn(async move {
-                        let mut buf = [0; 1024];
-                        loop {
-                            let incoming = listening_socket.recv_from(&mut buf).await;
-                            match incoming {
-                                Ok((len, addr)) => {
-                                    let msg = String::from_utf8_lossy(&buf[..len]);
-                                    incoming_tx.send(TransportMessage { msg: msg.to_string(), addr }).await.unwrap(); // panic if the channel is broken.
-                                }
-                                Err(e) => eprintln!("Error on incoming : {e}")
-                            }
-                        };
-                    });
-
-                    return Ok(UdpTransport { socket, incoming_rx, listening_task });
+                    return Ok(UdpTransport { socket: Arc::new(socket) });
                 },
                 Err(e) if e.kind() == std::io::ErrorKind::AddrInUse => continue,
                 Err(e) => return Err(e),
@@ -56,8 +38,22 @@ impl UdpTransport {
 
         Err(io::Error::new(io::ErrorKind::AddrNotAvailable, "[Listener] No available address"))
     }
+}
 
-    pub async fn send(&self, msg: TransportMessage) -> Result<usize> {
+#[async_trait]
+impl Transport for UdpTransport {
+    async fn send(&self, msg: TransportMessage) -> Result<usize> {
         self.socket.send_to(msg.msg.as_bytes(), msg.addr).await
+    }
+
+    async fn receive(&self, buf: &mut [u8; 1024]) -> Result<TransportMessage> {
+        let incoming = self.socket.recv_from(buf).await;
+        match incoming {
+            Ok((len, addr))  => {
+                let msg = String::from_utf8_lossy(&buf[..len]);
+                Ok(TransportMessage { msg: msg.to_string(), addr })
+            },
+            Err(e) => Err(e)
+        }
     }
 }

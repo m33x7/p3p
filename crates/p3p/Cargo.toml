@@ -8,3 +8,4 @@ enum_dispatch = "0.3.13"
 thiserror = "*"
 rand = "*"
 tokio = { version = "1.52.3", features = ["full"] }
+async-trait = "0.1.89"

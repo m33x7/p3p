@@ -13,6 +13,7 @@ crate p3p:
 - [ ] Basic message encryption
 - [X] Peer ID
 - [ ] Kademlia
+- [ ] SWIM
 - [X] UDP
 - [ ] QUIC
 - [ ] Multiplexing
@@ -24,4 +25,5 @@ crate p3p:
 - [ ] Add UT
 - [ ] Noise encryption
 - [ ] Add versioning to discoverability and lower levels
+- [ ] Add logging
 
